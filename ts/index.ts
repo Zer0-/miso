@@ -9,6 +9,7 @@ import {
   fetchCore,
   undelegate,
   shouldSync,
+  setShouldSync,
   getParentComponentId,
   integrityCheck,
   eventSourceConnect,
@@ -47,6 +48,7 @@ globalThis['miso'] = {
     undelegate,
     getParentComponentId,
     shouldSync,
+    setShouldSync,
     integrityCheck,
     setDrawingContext : function (name) {
       // dmj: this looks for a custom globally defined rendering / event context

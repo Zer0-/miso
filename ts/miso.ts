@@ -4,6 +4,7 @@ import { hydrate, integrityCheck } from './miso/hydrate';
 
 import {
    shouldSync,
+   setShouldSync,
    version,
    callFocus,
    callBlur,
@@ -49,6 +50,7 @@ export {
   undelegate,
   integrityCheck,
   shouldSync,
+  setShouldSync,
   getParentComponentId,
   websocketConnect,
   websocketClose,

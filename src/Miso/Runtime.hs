@@ -85,7 +85,7 @@ import qualified Data.IntMap.Strict as IM
 import qualified Data.Sequence as S
 import           Data.Sequence (Seq)
 #ifndef GHCJS_BOTH
-import           Language.Javascript.JSaddle hiding (Sync, Result, Success)
+import           Language.Javascript.JSaddle hiding (Sync, Result, Success, bracket)
 #else
 import           Language.Javascript.JSaddle
 #endif
@@ -105,6 +105,10 @@ import           Miso.Types
 import           Miso.Util
 import           Miso.CSS (renderStyleSheet)
 import           Miso.Effect (ComponentInfo(..), Sub, Sink, Effect, runEffect, io_, withSink)
+
+import Control.Exception (evaluate)
+import JSFFI.Profile (bracket, bracket2)
+import qualified Data.Map.Strict as Map
 -----------------------------------------------------------------------------
 -- | Helper function to abstract out initialization of t'Miso.Types.Component' between top-level API functions.
 initialize
@@ -136,7 +140,10 @@ initialize hydrate Component {..} getComponentMountPoint = do
   componentDOMRef <- getComponentMountPoint
   componentIsDirty <- liftIO (newTVarIO False)
   componentVTree <- do
-    vtree <- buildVTree hydrate (view initializedModel) componentSink logLevel events
+    let vdom_ = view initializedModel
+    profileView vdom_
+    vtree <- bracket2 "miso.buildVTree" $ buildVTree hydrate vdom_ componentSink logLevel events
+    bracket2 "miso.setShouldSync" $ setShouldSync vtree
     case hydrate of
       Draw -> do
         Diff.diff Nothing (Just vtree) componentDOMRef
@@ -166,6 +173,7 @@ initialize hydrate Component {..} getComponentMountPoint = do
       isDirty <- liftIO (readTVarIO componentIsDirty)
       when ((currentName /= updatedName && currentModel /= updatedModel) || isDirty) $ do
         newVTree <- buildVTree Draw (view updatedModel) componentSink logLevel events
+        setShouldSync newVTree
         oldVTree <- liftIO (readIORef componentVTree)
         void waitForAnimationFrame
         Diff.diff (Just oldVTree) (Just newVTree) componentDOMRef
@@ -742,7 +750,7 @@ buildVTree
   -> LogLevel
   -> Events
   -> JSM VTree
-buildVTree hydrate (VComp ns tag attrs (SomeComponent app)) snk _ _ = do
+buildVTree hydrate (VComp ns tag attrs (SomeComponent app)) snk _ _ = bracket "miso.buildVTree.VComp" $ do
   mountCallback <- do
     FFI.asyncCallback2 $ \domRef continuation -> do
       ComponentState {..} <- initialize hydrate app (pure domRef)
@@ -763,13 +771,15 @@ buildVTree hydrate (VComp ns tag attrs (SomeComponent app)) snk _ _ = do
   flip (FFI.set "mount") vcomp =<< toJSVal mountCallback
   FFI.set "unmount" unmountCallback vcomp
   pure (VTree vcomp)
-buildVTree hydrate (VNode ns tag attrs kids) snk logLevel events = do
-  vnode <- createNode "vnode" ns tag
-  setAttrs vnode attrs snk logLevel events
+buildVTree hydrate (VNode ns tag attrs kids) snk logLevel events = bracket "miso.buildVTree.VNode" $ do
+  vnode <- bracket "miso.buildVTree.VNode.createNode" $ createNode "vnode" ns tag
+  bracket "miso.buildVTree.VNode.setAttrs" $ setAttrs vnode attrs snk logLevel events
   vchildren <- toJSVal =<< procreate
-  FFI.set "children" vchildren vnode
-  sync <- FFI.shouldSync =<< toJSVal vnode
-  FFI.set "shouldSync" sync vnode
+  bracket "miso.buildVTree.VNode.setChildren" $ FFI.set "children" vchildren vnode
+
+  -- getting the sync bool and setting it should be done in one operation to avoid threading the bool through the FFI
+  -- sync <- bracket "miso.buildVTree.VNode.shouldSync" $ FFI.shouldSync =<< toJSVal vnode
+  -- bracket "miso.buildVTree.VNode.setShouldSync" $ FFI.set "shouldSync" sync vnode
   pure $ VTree vnode
     where
       procreate = do
@@ -781,7 +791,7 @@ buildVTree hydrate (VNode ns tag attrs kids) snk logLevel events = do
           where
             setNextSibling xs =
               zipWithM_ (<# ("nextSibling" :: MisoString)) xs (drop 1 xs)
-buildVTree _ (VText t) _ _ _ = do
+buildVTree _ (VText t) _ _ _ = bracket "miso.buildVTree.VText" $ do
   vtree <- create
   FFI.set "type" ("vtext" :: JSString) vtree
   FFI.set "ns" ("text" :: JSString) vtree
@@ -1523,3 +1533,33 @@ blob = BLOB
 arrayBuffer :: ArrayBuffer -> Payload value
 arrayBuffer = BUFFER
 -----------------------------------------------------------------------------
+profileView :: MonadIO m => View model action -> m ()
+profileView = (bracket "miso.view") . void . liftIO . evaluate . forceView
+
+-- | Force evaluation of the spine and keys of a View tree.
+--   Enough to ensure user view logic (e.g., list mapping, conditionals) is timed.
+forceView :: View model action -> ()
+forceView = go
+  where
+    go :: View model action -> ()
+    go (VNode ns tag attrs children) =
+      ns `seq` tag `seq` forceList forceAttribute attrs `seq` forceList go children
+    go (VText s) = s `seq` ()
+    go (VComp ns tag attrs comp) =
+      ns `seq` tag `seq` forceList forceAttribute attrs `seq` comp `seq` ()
+
+    forceAttribute :: Attribute action -> ()
+    forceAttribute (Property k v) = k `seq` v `seq` ()
+    forceAttribute (Event _)      = ()  -- functions can't be meaningfully forced
+    forceAttribute (Styles m)     = Map.foldlWithKey' (\() k v -> k `seq` v `seq` ()) () m
+
+    -- Force the spine of a list (not deep contents—those are handled by caller)
+    forceList :: (a -> ()) -> [a] -> ()
+    forceList _ []     = ()
+    forceList f (x:xs) = f x `seq` forceList f xs
+
+
+setShouldSync :: VTree -> JSM ()
+setShouldSync vtree = do
+    j <- toJSVal $ getTree vtree
+    FFI.setShouldSync j

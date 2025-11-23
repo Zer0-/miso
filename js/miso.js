@@ -65,6 +65,27 @@ function shouldSync(node) {
   }
   return enterSync;
 }
+function setShouldSync(vtree) {
+  if (vtree.type === "vnode") {
+    for (let i = 0;i < vtree.children.length; i++) {
+      setShouldSync(vtree.children[i]);
+    }
+    let enterSync = vtree.children.length > 0;
+    if (enterSync) {
+      for (let i = 0;i < vtree.children.length; i++) {
+        if (!vtree.children[i].key) {
+          enterSync = false;
+          break;
+        }
+      }
+    }
+    vtree.shouldSync = enterSync;
+  } else if (vtree.type === "vcomp") {
+    for (let i = 0;i < vtree.children.length; i++) {
+      setShouldSync(vtree.children[i]);
+    }
+  }
+}
 function getParentComponentId(vcompNode) {
   var climb = function(node) {
     let parentComponentId = null;
@@ -935,6 +956,7 @@ globalThis["miso"] = {
   undelegate,
   getParentComponentId,
   shouldSync,
+  setShouldSync,
   integrityCheck,
   setDrawingContext: function(name) {
     const drawing = globalThis[name]["drawingContext"];

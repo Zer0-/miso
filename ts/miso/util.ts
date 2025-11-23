@@ -92,6 +92,33 @@ export function shouldSync<T> (
     return enterSync;
 }
 
+export function setShouldSync<T>(vtree: VTree<T>): void {
+  if (vtree.type === 'vnode') {
+    // First, recursively process all children
+    for (let i = 0; i < vtree.children.length; i++) {
+      setShouldSync(vtree.children[i]);
+    }
+
+    // Then compute shouldSync for this node
+    let enterSync = vtree.children.length > 0;
+    if (enterSync) {
+      for (let i = 0; i < vtree.children.length; i++) {
+        if (!vtree.children[i].key) {
+          enterSync = false;
+          break;
+        }
+      }
+    }
+    vtree.shouldSync = enterSync;
+  } else if (vtree.type === 'vcomp') {
+    // VComp has children; recurse into them
+    for (let i = 0; i < vtree.children.length; i++) {
+      setShouldSync(vtree.children[i]);
+    }
+  }
+  // VText has no children and no shouldSync — nothing to do
+}
+
 /*
    'getParentComponentId'
    dmj: Used to fetch the parent's componentId

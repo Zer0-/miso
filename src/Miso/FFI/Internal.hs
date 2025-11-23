@@ -140,6 +140,7 @@ module Miso.FFI.Internal
    , newFileReader
    -- * fetch API
    , Response (..)
+   , setShouldSync
    ) where
 -----------------------------------------------------------------------------
 import           Control.Monad (foldM)
@@ -670,6 +671,12 @@ shouldSync :: JSVal -> JSM Bool
 shouldSync vnode = do
   returnValue <- jsg "miso" # "shouldSync" $ [vnode]
   fromJSValUnchecked returnValue
+
+
+setShouldSync :: JSVal -> JSM ()
+setShouldSync vtree =
+    void $ jsg "miso" # "setShouldSync" $ [vtree]
+
 -----------------------------------------------------------------------------
 -- | Flush is used to force a draw of the render tree. This is currently
 -- only used when targeting platforms other than the browser (like mobile).

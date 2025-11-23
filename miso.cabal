@@ -124,6 +124,7 @@ library
     Miso.Hydrate
     Miso.FFI.Internal
     Miso.Runtime
+    JSFFI.Profile
   exposed-modules:
     Miso
     Miso.Binding
@@ -193,4 +194,6 @@ library
     jsaddle       < 0.10,
     mtl           < 2.4,
     text          < 2.2,
-    stm >= 2.4 && < 2.6
+    stm >= 2.4 && < 2.6,
+    ghc-experimental,
+    deepseq

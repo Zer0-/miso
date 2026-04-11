@@ -971,11 +971,19 @@ function collapseSiblingTextNodes(vs) {
   return adjusted;
 }
 function hydrate(logLevel, mountPoint, vtree, context, drawingContext2) {
+  console.log("hydrate.ts - hydrate enter");
   if (!vtree || !mountPoint)
     return false;
   if (mountPoint.nodeType === 3)
     return false;
-  if (!walk(logLevel, vtree, context.firstChild(mountPoint), context, drawingContext2)) {
+  const vdomPath = [];
+  const domPath = [];
+  if (logLevel) {
+    console.log("[DEBUG_HYDRATE] === Full VTree Structure ===");
+    printVTreeTree(vtree, 0, true);
+    console.log("[DEBUG_HYDRATE] === End VTree Structure ===");
+  }
+  if (!walk(logLevel, vtree, context.firstChild(mountPoint), context, drawingContext2, vdomPath, domPath)) {
     if (logLevel) {
       console.warn("[DEBUG_HYDRATE] Could not copy DOM into virtual DOM, falling back to diff");
     }
@@ -989,44 +997,141 @@ function hydrate(logLevel, mountPoint, vtree, context, drawingContext2) {
   }
   return true;
 }
-function diagnoseError(logLevel, vtree, node) {
-  if (logLevel)
-    console.warn("[DEBUG_HYDRATE] VTree differed from node", vtree, node);
+function printPaths(vdomPath, domPath) {
+  console.warn("[DEBUG_HYDRATE] === VDOM Path ===");
+  for (let i = 0;i < vdomPath.length; i++) {
+    console.warn(`[DEBUG_HYDRATE] [${i}]`, vdomPath[i]);
+  }
+  console.warn("[DEBUG_HYDRATE] === DOM Path ===");
+  for (let i = 0;i < domPath.length; i++) {
+    console.warn(`[DEBUG_HYDRATE] [${i}]`, domPath[i]);
+  }
 }
-function walk(logLevel, vtree, node, context, drawingContext2) {
+function printVTreeTree(vtree, depth = 0, logLevel = true) {
+  if (!logLevel)
+    return;
+  const indent = "  ".repeat(depth);
+  const label = formatVTreeForPath(vtree);
+  console.log(`[DEBUG_VTREE] ${indent}${label}`);
+  switch (vtree.type) {
+    case 1 /* VNode */: {
+      const vnode = vtree;
+      if (vnode.children && vnode.children.length > 0) {
+        for (const child of vnode.children) {
+          printVTreeTree(child, depth + 1, logLevel);
+        }
+      }
+      break;
+    }
+    case 0 /* VComp */: {
+      const vcomp = vtree;
+      if (vcomp.child) {
+        printVTreeTree(vcomp.child, depth + 1, logLevel);
+      }
+      break;
+    }
+    case 2 /* VText */:
+      break;
+  }
+}
+function formatVTreeForPath(vtree) {
+  switch (vtree.type) {
+    case 1 /* VNode */: {
+      const vnode = vtree;
+      const attrs = [];
+      if (vnode.key)
+        attrs.push(`key="${vnode.key}"`);
+      if (vnode.props && vnode.props.id)
+        attrs.push(`id="${vnode.props.id}"`);
+      if (vnode.classList && vnode.classList.size > 0) {
+        const classes = Array.from(vnode.classList).join(" ");
+        attrs.push(`class="${classes}"`);
+      } else if (vnode.props && vnode.props.class) {
+        attrs.push(`class="${vnode.props.class}"`);
+      }
+      if (attrs.length <= 1 && vnode.props) {
+        const priorityProps = ["name", "type", "href", "src", "data-id", "data-key"];
+        for (const prop of priorityProps) {
+          if (vnode.props[prop]) {
+            const val = String(vnode.props[prop]).slice(0, 50);
+            if (!attrs.some((a) => a.startsWith(`${prop}="`))) {
+              attrs.push(`${prop}="${val}"`);
+            }
+            break;
+          }
+        }
+      }
+      const attrStr = attrs.length > 0 ? " " + attrs.join(" ") : "";
+      return `<${vnode.tag}${attrStr}>`;
+    }
+    case 2 /* VText */: {
+      const txt = vtree.text;
+      return `#text "${txt.slice(0, 30)}${txt.length > 30 ? "..." : ""}"`;
+    }
+    case 0 /* VComp */: {
+      const vcomp = vtree;
+      const id = vcomp.componentId || vcomp.key || "unknown";
+      return `<VComp id: ${id}>`;
+    }
+    default:
+      return `<unknown type: ${vtree.type}>`;
+  }
+}
+function diagnoseError(logLevel, vtree, node, vdomPath, domPath) {
+  if (logLevel) {
+    console.warn("[DEBUG_HYDRATE] VTree differed from node");
+    printPaths(vdomPath, domPath);
+    console.warn("[DEBUG_HYDRATE] VTree:", vtree);
+    console.warn("[DEBUG_HYDRATE] DOM node:", node);
+  }
+}
+function walk(logLevel, vtree, node, context, drawingContext2, vdomPath, domPath) {
+  if (logLevel) {
+    vdomPath.push(formatVTreeForPath(vtree));
+    domPath.push(node);
+  }
+  console.log("[DEBUG_WALK]", formatVTreeForPath(vtree), node);
   switch (vtree.type) {
     case 0 /* VComp */:
       let mounted = vtree.mount(node.parentNode);
       vtree.componentId = mounted.componentId;
       vtree.child = mounted.componentTree;
       mounted.componentTree.parent = vtree;
-      if (!walk(logLevel, vtree.child, node, context, drawingContext2)) {
+      if (!walk(logLevel, vtree.child, node, context, drawingContext2, vdomPath, domPath)) {
         return false;
       }
       break;
     case 2 /* VText */:
       if (node.nodeType !== 3 || vtree.text.trim() !== node.textContent.trim()) {
-        diagnoseError(logLevel, vtree, node);
+        diagnoseError(logLevel, vtree, node, vdomPath, domPath);
         return false;
       }
       vtree.domRef = node;
       break;
     case 1 /* VNode */:
       if (node.nodeType !== 1) {
-        diagnoseError(logLevel, vtree, node);
+        diagnoseError(logLevel, vtree, node, vdomPath, domPath);
         return false;
       }
       vtree.domRef = node;
       vtree.children = collapseSiblingTextNodes(vtree.children);
       callCreated(node, vtree, drawingContext2);
+      const savedVdomPath = logLevel ? [...vdomPath] : null;
+      const savedDomPath = logLevel ? [...domPath] : null;
       for (var i = 0;i < vtree.children.length; i++) {
+        if (logLevel) {
+          vdomPath.length = 0;
+          domPath.length = 0;
+          vdomPath.push(...savedVdomPath);
+          domPath.push(...savedDomPath);
+        }
         const vdomChild = vtree.children[i];
         const domChild = node.childNodes[i];
         if (!domChild) {
-          diagnoseError(logLevel, vdomChild, domChild);
+          diagnoseError(logLevel, vdomChild, domChild, vdomPath, domPath);
           return false;
         }
-        if (!walk(logLevel, vdomChild, domChild, context, drawingContext2)) {
+        if (!walk(logLevel, vdomChild, domChild, context, drawingContext2, vdomPath, domPath)) {
           return false;
         }
       }

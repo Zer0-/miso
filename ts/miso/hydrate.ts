@@ -15,6 +15,7 @@ function collapseSiblingTextNodes(vs: Array<VTree<DOMRef>>): Array<VTree<DOMRef>
 }
 
 export function hydrate(logLevel: boolean, mountPoint: DOMRef | Text, vtree: VTree<DOMRef>, context: HydrationContext<DOMRef>, drawingContext: DrawingContext<DOMRef>): boolean {
+  console.log("hydrate.ts - hydrate enter");
 
   /* hydration mountPoint must be the root */
   if (!vtree || !mountPoint) return false;
@@ -22,8 +23,18 @@ export function hydrate(logLevel: boolean, mountPoint: DOMRef | Text, vtree: VTr
   /* Don't hydrate on text mountPoint */
   if (mountPoint.nodeType === 3) return false;
 
+  const vdomPath = [];
+  const domPath = [];
+
+  // Print the full VTree structure for debugging
+  if (logLevel) {
+    console.log('[DEBUG_HYDRATE] === Full VTree Structure ===');
+    printVTreeTree(vtree, 0, true);
+    console.log('[DEBUG_HYDRATE] === End VTree Structure ===');
+  }
+
   // begin walking the DOM, report the result
-  if (!walk(logLevel, vtree, context.firstChild(mountPoint as DOMRef), context, drawingContext)) {
+  if (!walk(logLevel, vtree, context.firstChild(mountPoint as DOMRef), context, drawingContext, vdomPath, domPath)) {
     // If we failed to prerender because the structures were different, fallback to drawing
       if (logLevel) {
         console.warn('[DEBUG_HYDRATE] Could not copy DOM into virtual DOM, falling back to diff');
@@ -40,50 +51,182 @@ export function hydrate(logLevel: boolean, mountPoint: DOMRef | Text, vtree: VTr
   return true;
 }
 
-function diagnoseError(logLevel: boolean, vtree: VTree<DOMRef>, node: Node): void {
-  if (logLevel) console.warn('[DEBUG_HYDRATE] VTree differed from node', vtree, node);
+// Add this helper function near diagnoseError
+function printPaths(vdomPath: Array<any>, domPath: Array<any>): void {
+  console.warn('[DEBUG_HYDRATE] === VDOM Path ===');
+  for (let i = 0; i < vdomPath.length; i++) {
+    console.warn(`[DEBUG_HYDRATE] [${i}]`, vdomPath[i]);
+  }
+  console.warn('[DEBUG_HYDRATE] === DOM Path ===');
+  for (let i = 0; i < domPath.length; i++) {
+    console.warn(`[DEBUG_HYDRATE] [${i}]`, domPath[i]);
+  }
 }
 
-function walk(logLevel: boolean, vtree: VTree<DOMRef>, node: Node, context: HydrationContext<DOMRef>, drawingContext: DrawingContext<DOMRef>): boolean {
+// Recursive helper to print the full VTree structure using formatVTreeForPath
+function printVTreeTree(vtree: VTree<DOMRef>, depth: number = 0, logLevel: boolean = true): void {
+  if (!logLevel) return;
+  
+  const indent = '  '.repeat(depth);
+  const label = formatVTreeForPath(vtree);
+  console.log(`[DEBUG_VTREE] ${indent}${label}`);
+  
+  switch (vtree.type) {
+    case VTreeType.VNode: {
+      const vnode = vtree as VNode<DOMRef>;
+      // Recurse into children array
+      if (vnode.children && vnode.children.length > 0) {
+        for (const child of vnode.children) {
+          printVTreeTree(child, depth + 1, logLevel);
+        }
+      }
+      break;
+    }
+    case VTreeType.VComp: {
+      const vcomp = vtree as VComp<DOMRef>;
+      // VComp has a single `child` property (not an array)
+      if (vcomp.child) {
+        printVTreeTree(vcomp.child, depth + 1, logLevel);
+      }
+      break;
+    }
+    case VTreeType.VText:
+      // Leaf node, nothing to recurse into
+      break;
+  }
+}
+
+// Helper to format a VTree node with identifying attributes for debug paths
+function formatVTreeForPath(vtree: VTree<DOMRef>): string {
+  switch (vtree.type) {
+    case VTreeType.VNode: {
+      const vnode = vtree as VNode<DOMRef>;
+      const attrs: string[] = [];
+      
+      // Add key if present (useful for debugging lists)
+      if (vnode.key) attrs.push(`key="${vnode.key}"`);
+      
+      // Add id from props
+      if (vnode.props && vnode.props.id) attrs.push(`id="${vnode.props.id}"`);
+      
+      // Add class information - classList is a Set<string>
+      if (vnode.classList && vnode.classList.size > 0) {
+        const classes = Array.from(vnode.classList).join(' ');
+        attrs.push(`class="${classes}"`);
+      } else if (vnode.props && vnode.props.class) {
+        // Fallback to props.class if classList is empty
+        attrs.push(`class="${vnode.props.class}"`);
+      }
+      
+      // Add a few common distinguishing props if still no identifying attrs
+      if (attrs.length <= 1 && vnode.props) { // <=1 because we always have key or id/class if present
+        const priorityProps = ['name', 'type', 'href', 'src', 'data-id', 'data-key'];
+        for (const prop of priorityProps) {
+          if (vnode.props[prop]) {
+            const val = String(vnode.props[prop]).slice(0, 50);
+            // Avoid duplicating if already added as id/class
+            if (!attrs.some(a => a.startsWith(`${prop}="`))) {
+              attrs.push(`${prop}="${val}"`);
+            }
+            break;
+          }
+        }
+      }
+      
+      const attrStr = attrs.length > 0 ? ' ' + attrs.join(' ') : '';
+      return `<${vnode.tag}${attrStr}>`;
+    }
+    case VTreeType.VText: {
+      const txt = (vtree as VText<DOMRef>).text;
+      return `#text "${txt.slice(0, 30)}${txt.length > 30 ? '...' : ''}"`;
+    }
+    case VTreeType.VComp: {
+      const vcomp = vtree as VComp<DOMRef>;
+      const id = vcomp.componentId || vcomp.key || 'unknown';
+      return `<VComp id: ${id}>`;
+    }
+    default:
+      return `<unknown type: ${vtree.type}>`;
+  }
+}
+
+// Replace the existing diagnoseError with:
+function diagnoseError(logLevel: boolean, vtree: VTree<DOMRef>, node: Node | null, vdomPath: Array<any>, domPath: Array<any>): void {
+  if (logLevel) {
+    console.warn('[DEBUG_HYDRATE] VTree differed from node');
+    printPaths(vdomPath, domPath);
+    console.warn('[DEBUG_HYDRATE] VTree:', vtree);
+    console.warn('[DEBUG_HYDRATE] DOM node:', node);
+  }
+}
+
+function walk(logLevel: boolean, vtree: VTree<DOMRef>, node: Node, context: HydrationContext<DOMRef>, drawingContext: DrawingContext<DOMRef>, vdomPath, domPath): boolean {
+  // Push current node info to paths if logging
+  if (logLevel) {
+    vdomPath.push(formatVTreeForPath(vtree));
+    domPath.push(node);
+  }
+
+  // console.log("[DEBUG_WALK]", formatVTreeForPath(vtree), node);
+
   // This is slightly more complicated than one might expect since
   // browsers will collapse consecutive text nodes into a single text node.
   // There can thus be fewer DOM nodes than VDOM nodes.
   // We handle this in collapseSiblingTextNodes
   switch (vtree.type) {
-      case VTreeType.VComp:
+    case VTreeType.VComp:
        let mounted: Mount<DOMRef> = vtree.mount (node.parentNode as DOMRef);
+
+       // // Print the full VTree structure for debugging
+       // if (logLevel) {
+       //   console.log('[DEBUG_HYDRATE] === Full VTree Structure after mount ===');
+       //   printVTreeTree(mounted.componentTree, 0, true);
+       //   console.log('[DEBUG_HYDRATE] === End VTree Structure after mount ===');
+       // }
+
        vtree.componentId = mounted.componentId;
        vtree.child = mounted.componentTree;
        mounted.componentTree.parent = vtree;
-       if (!walk(logLevel, vtree.child, node, context, drawingContext)) {
+       if (!walk(logLevel, vtree.child, node, context, drawingContext, vdomPath, domPath)) {
           return false;
        }
        break;
     case VTreeType.VText:
-       if (node.nodeType !== 3 || vtree.text.trim() !== node.textContent.trim()) {
-         diagnoseError(logLevel, vtree, node);
-         return false;
-       }
+      if (node.nodeType !== 3 || vtree.text.trim() !== node.textContent.trim()) {
+        diagnoseError(logLevel, vtree, node, vdomPath, domPath);
+        return false;
+      }
       vtree.domRef = node as DOMRef;
       break;
     case VTreeType.VNode:
       if (node.nodeType !== 1) {
-         diagnoseError(logLevel, vtree, node);
-         return false;
+        diagnoseError(logLevel, vtree, node, vdomPath, domPath);
+        return false;
       }
       vtree.domRef = node as DOMRef;
       vtree.children = collapseSiblingTextNodes(vtree.children);
       // Fire onCreated events as though the elements had just been created.
       callCreated(node, vtree, drawingContext);
 
+      // Save path state before iterating children
+      const savedVdomPath = logLevel ? [...vdomPath] : null;
+      const savedDomPath = logLevel ? [...domPath] : null;
+
       for (var i = 0; i < vtree.children.length; i++) {
+        if (logLevel) {
+          vdomPath.length = 0;
+          domPath.length = 0;
+          vdomPath.push(...savedVdomPath!);
+          domPath.push(...savedDomPath!);
+        }
+
         const vdomChild = vtree.children[i];
         const domChild = node.childNodes[i];
         if (!domChild) {
-          diagnoseError(logLevel, vdomChild, domChild);
+          diagnoseError(logLevel, vdomChild, domChild, vdomPath, domPath);
           return false;
         }
-        if (!walk(logLevel, vdomChild, domChild, context, drawingContext)) {
+        if (!walk(logLevel, vdomChild, domChild, context, drawingContext, vdomPath, domPath)) {
           return false;
         }
       }

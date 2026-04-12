@@ -160,6 +160,34 @@ function diagnoseError(logLevel: boolean, vtree: VTree<DOMRef>, node: Node | nul
   }
 }
 
+function debugCompareUnicode(vText: string, dText: string): boolean {
+  // [...string] iterates by Unicode code points, correctly handling surrogate pairs
+  const vChars = [...vText];
+  const dChars = [...dText];
+  const maxLen = Math.max(vChars.length, dChars.length);
+
+  for (let i = 0; i < maxLen; i++) {
+    const v = vChars[i];
+    const d = dChars[i];
+
+    if (v === undefined) {
+      console.error(`ERROR: Length mismatch at index ${i}. Virtual tree ended, but DOM contains extra character: "${d}"`);
+      return false;
+    }
+    if (d === undefined) {
+      console.error(`ERROR: Length mismatch at index ${i}. DOM ended, but virtual tree contains extra character: "${v}"`);
+      return false;
+    }
+    if (v !== d) {
+      console.error(`ERROR: Character mismatch at index ${i}. Expected "${v}" (virtual tree), but got "${d}" (DOM)`);
+      return false;
+    }
+  }
+
+  console.log(`SUCCESS: Text strings match exactly (${vChars.length} characters).`);
+  return true;
+}
+
 function walk(logLevel: boolean, vtree: VTree<DOMRef>, node: Node, context: HydrationContext<DOMRef>, drawingContext: DrawingContext<DOMRef>, vdomPath, domPath): boolean {
   // Push current node info to paths if logging
   if (logLevel) {
@@ -191,13 +219,31 @@ function walk(logLevel: boolean, vtree: VTree<DOMRef>, node: Node, context: Hydr
           return false;
        }
        break;
-    case VTreeType.VText:
-      if (node.nodeType !== 3 || vtree.text.trim() !== node.textContent.trim()) {
+    case VTreeType.VText: {
+      // Condition 1: Verify node type
+      if (node.nodeType !== 3) {
+        console.error(`ERROR: Expected a Text Node (nodeType 3), but received nodeType ${node.nodeType}`);
         diagnoseError(logLevel, vtree, node, vdomPath, domPath);
         return false;
       }
+
+      // Condition 2: Extract strings safely
+      const vStr = vtree.text ?? '';
+      const dStr = node.data; // .data is the standard, zero-overhead property for TEXT_NODEs
+
+      // Condition 3: Character-by-character comparison
+      if (!debugCompareUnicode(vStr, dStr)) {
+        // JSON.stringify safely escapes invisible chars like \n, \t, \r for readable console output
+        console.error(`DETAILS - Virtual Text: ${JSON.stringify(vStr)}`);
+        console.error(`DETAILS - DOM Text:     ${JSON.stringify(dStr)}`);
+        diagnoseError(logLevel, vtree, node, vdomPath, domPath);
+        return false;
+      }
+
+      // All conditions passed
       vtree.domRef = node as DOMRef;
       break;
+    }
     case VTreeType.VNode:
       if (node.nodeType !== 1) {
         diagnoseError(logLevel, vtree, node, vdomPath, domPath);

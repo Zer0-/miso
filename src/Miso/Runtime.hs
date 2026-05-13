@@ -400,7 +400,7 @@ applyParentBindings pId mdl bindings = do
       foldr (applyBinding parentState) mdl bindings
   where
     applyBinding parentState (ParentToChild from into) acc = into (from (parentState ^. componentModel)) acc
-    applyBinding parentState (Bidirectional from _ _ into) acc = into (from (parentState ^. componentModel)) acc
+    applyBinding parentState (Bidirectional _ from _ _ into) acc = into (from (parentState ^. componentModel)) acc
     applyBinding _ _ acc = acc
 -----------------------------------------------------------------------------
 type ComponentIds = IntSet

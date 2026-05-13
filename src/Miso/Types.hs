@@ -66,9 +66,17 @@ module Miso.Types
   -- ** Component mounting
   , (+>)
   , mount_
+  -- ** Key combinators
+  , keyed
+  -- ** Fragment combinators
+  , fragment
+  , fragment_
+  , vfrag
+  , vfrag_
   -- ** Utils
   , getMountPoint
   , optionalAttrs
+  , optionalVoidAttrs
   , optionalChildren
   , prettyURI
   , prettyQueryString
@@ -292,12 +300,70 @@ data View model action
   = VNode Namespace Tag [Attribute action] [View model action]
   | VText (Maybe Key) MisoString
   | VComp (Maybe Key) (SomeComponent model)
+  | VFrag (Maybe Key) [View model action]
   deriving Functor
 -----------------------------------------------------------------------------
 -- | Existential wrapper allowing nesting of t'Miso.Types.Component' in t'Miso.Types.Component'
 data SomeComponent parent
    = forall model action . Eq model
   => SomeComponent (Component parent model action)
+-----------------------------------------------------------------------------
+-- | Like '+>' but operates on any 'View', not just 'Component'.
+--
+-- This appends a 'Key' to any 'View'.
+--
+-- @
+-- keyed "key" ("some text" :: View model action)
+-- keyed "key" $ div_ [ id_ "container" ] [ "content" ]
+-- keyed "key" (mount_ calendarComponent)
+-- @
+--
+-- @since 1.10.0.0
+keyed
+  :: MisoString
+  -> View model action
+  -> View model action
+keyed key = \case
+    VText _ txt ->
+      VText (Just (Key key)) txt
+    VComp _ comp ->
+      VComp (Just (Key key)) comp
+    VFrag _ kids ->
+      VFrag (Just (Key key)) kids
+    VNode ns tag attrs kids ->
+      VNode ns tag (Property "key" (toJSON key) : attrs) kids
+-----------------------------------------------------------------------------
+-- | Create a fragment (keyless).
+--
+-- A fragment groups multiple sibling 'View' nodes without introducing
+-- an extra DOM element.
+--
+-- Synonym for `fragment'
+--
+-- @since 1.10.0.0
+vfrag :: [View model action] -> View model action
+vfrag = fragment
+-----------------------------------------------------------------------------
+-- | Create a fragment (keyless).
+--
+-- A fragment groups multiple sibling 'View' nodes without introducing
+-- an extra DOM element.
+--
+-- @since 1.10.0.0
+fragment :: [View model action] -> View model action
+fragment = VFrag Nothing
+-----------------------------------------------------------------------------
+-- | Like 'fragment', but keyed for efficient diffing.
+--
+-- @since 1.10.0.0
+vfrag_ :: MisoString -> [View model action] -> View model action
+vfrag_ key = VFrag (Just (Key key))
+-----------------------------------------------------------------------------
+-- | Like 'fragment', but keyed for efficient diffing.
+--
+-- @since 1.10.0.0
+fragment_ :: MisoString -> [View model action] -> View model action
+fragment_ key = VFrag (Just (Key key))
 -----------------------------------------------------------------------------
 -- | t'Miso.Types.Component' mounting combinator
 --
@@ -569,6 +635,27 @@ optionalAttrs element attrs condition opts kids =
       let newAttrs = concat [ opts | condition ] ++ attrs
       VNode ns name newAttrs kids
     x -> x
+-----------------------------------------------------------------------------
+-- | Utility function to make it easy to specify conditional attributes for void elements.
+--
+-- @
+-- view :: Bool -> View model action
+-- view shouldClear = optionalVoidAttrs textarea_ [ value_ "" ] shouldClear [ id_ "text-area-id" ]
+-- @
+--
+-- @since 1.9.0.0
+optionalVoidAttrs
+  :: ([Attribute action] -> View model action)
+  -> [Attribute action] -- ^ Attributes to be added unconditionally
+  -> Bool -- ^ A condition
+  -> [Attribute action] -- ^ Additional attributes to add if the condition is True
+  -> View model action
+optionalVoidAttrs element attrs condition opts =
+  case element attrs of
+    VNode ns name _ kids -> do
+      let newAttrs = concat [ opts | condition ] ++ attrs
+      VNode ns name newAttrs kids
+    x -> x
 ----------------------------------------------------------------------------
 -- | Conditionally adds children.
 --
@@ -635,6 +722,7 @@ data VTreeType
   = VCompType
   | VNodeType
   | VTextType
+  | VFragType
   deriving (Show, Eq)
 -----------------------------------------------------------------------------
 instance ToJSVal VTreeType where
@@ -642,4 +730,5 @@ instance ToJSVal VTreeType where
     VCompType -> toJSVal (0 :: Int)
     VNodeType -> toJSVal (1 :: Int)
     VTextType -> toJSVal (2 :: Int)
+    VFragType -> toJSVal (3 :: Int)
 -----------------------------------------------------------------------------

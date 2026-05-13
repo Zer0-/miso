@@ -29,7 +29,7 @@
 
 ##
 
-**Miso** is a small, production-ready, component-oriented, [reactive](https://github.com/haskell-miso/miso-reactive), [isomorphic](http://nerds.airbnb.com/isomorphic-javascript-future-web-apps/) [Haskell](https://www.haskell.org/) front-end framework for quickly building highly interactive single-page web and [mobile](https://github.com/dmjio/miso-native) applications. It features a virtual-dom, recursive diffing / patching algorithm, attribute and property normalization, event delegation, event batching, SVG, 2D/3D Canvas (WebGL), Server-sent events ([SSE](https://github.com/haskell-miso/miso-sse)), [Websockets](https://github.com/haskell-miso/miso-websocket), type-safe [servant](https://haskell-servant.github.io/)-style routing and an extensible Subscription-based subsystem. Inspired by [Elm](http://elm-lang.org/) and [React](http://react.dev/). **Miso** is pure by default, but side effects can be introduced into the system via the `Effect` data type.
+**Miso** is a small, production-ready, component-oriented, [reactive](https://github.com/haskell-miso/miso-reactive), [isomorphic](http://nerds.airbnb.com/isomorphic-javascript-future-web-apps/) [Haskell](https://www.haskell.org/) front-end framework for quickly building highly interactive single-page web and [mobile](https://github.com/dmjio/miso-native) applications. It features a virtual-dom, recursive diffing / patching algorithm, attribute and property normalization, event delegation, event batching, SVG, 2D/3D Canvas (WebGL), [Fetch](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API), Server-sent events ([SSE](https://github.com/haskell-miso/miso-sse)), [Websockets](https://github.com/haskell-miso/miso-websocket), type-safe [servant](https://haskell-servant.github.io/)-style routing and an extensible Subscription-based subsystem. Inspired by [Elm](http://elm-lang.org/) and [React](http://react.dev/). **Miso** is pure by default, but side effects can be introduced into the system via the `Effect` data type.
 
 **Miso** makes heavy use of the [GHC Javascript FFI](https://ghc.gitlab.haskell.org/ghc/doc/users_guide/wasm.html#javascript-ffi-in-the-wasm-backend) and therefore has minimal dependencies. **Miso** can be considered a shallow [embedded domain-specific language](https://wiki.haskell.org/Embedded_domain_specific_language) for modern web programming.
 
@@ -76,9 +76,6 @@
   - Implementing modern JavaScript frontend techniques as found in [react](https://react.dev) (e.g. [Reconciliation](https://legacy.reactjs.org/docs/reconciliation.html#the-diffing-algorithm), [isomorphic](https://en.wikipedia.org/wiki/Isomorphic_JavaScript))
 
 Miso aims to [bridge the gap](https://wiki.haskell.org/The_JavaScript_Problem) between modern JavaScript frameworks (such as [React](https://reactjs.org), [Vue.js](https://vuejs.org), etc.) and functional programming in [Haskell](https://haskell.org). It has since grown to encompass more features from the JavaScript community like [Components](https://react.dev/learn/your-first-component) and [Renderers](https://github.com/chentsulin/awesome-react-renderer). Miso also now supports [native development](https://github.com/haskell-miso/miso-lynx) for [iOS](https://www.apple.com/ios/), [Android](https://www.android.com/) and [HarmonyOS](https://device.harmonyos.com/en/) devices via [LynxJS](https://lynxjs.org) and targets additional backends like [Web Assembly](https://ghc.gitlab.haskell.org/ghc/doc/users_guide/wasm.html).
-
-> [!Note]
-> [React-style Components](https://github.com/dmjio/miso/pull/766) are now added to `miso` as of version `1.9`. This has not yet been released, we recommend developing against `master` if you'd like to use latest features.
 
 ## Docs 📚
  
@@ -198,9 +195,9 @@ main = startApp defaultEvents app
 foreign export javascript "hs_start" main :: IO ()
 #endif
 ----------------------------------------------------------------------------
--- | `component` takes as arguments the initial model, update function, view function
+-- | `vcomp` takes as arguments the initial model, update function, view function
 app :: App Int Action
-app = component 0 updateModel viewModel
+app = vcomp 0 updateModel viewModel
 ----------------------------------------------------------------------------
 -- | Updates model, optionally introduces side effects
 updateModel :: Action -> Effect parent Int Action
@@ -213,10 +210,7 @@ updateModel = \case
 ----------------------------------------------------------------------------
 -- | Constructs a virtual DOM from a model
 viewModel :: Int -> View Int Action
-viewModel x =
-  H.div_
-    [ P.className "counter"
-    ]
+viewModel x = vfrag
     [ H.button_ [ H.onClick AddOne ] [ text "+" ]
     , text (ms x)
     , H.button_ [ H.onClick SubtractOne ] [ text "-" ]
@@ -447,12 +441,6 @@ If you'd like to support this project financially, be it through requesting feat
 ## Backers
 
 Become a [financial contributor](https://opencollective.com/miso/contribute) and help us sustain our project and community. We are very grateful and thankful for our individual sponsors.
-
-  - Moses Tschanz
-  - [@MaxGabriel](https://github.com/MaxGabriel)
-  - [@maybetonyfu](https://github.com/maybetonyfu)
-  - [@jhrcek](https://github.com/jhrcek)
-  - etc.
 
 <a href="https://opencollective.com/miso"><img src="https://opencollective.com/miso/individuals.svg?width=890"></a>
 

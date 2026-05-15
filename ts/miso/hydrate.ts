@@ -1,4 +1,5 @@
 import { callCreated } from './dom';
+import { getLastDOMRef } from './util';
 import { Mount, DrawingContext, HydrationContext, VTree, VText, DOMRef, VTreeType } from './types';
 
 /* prerendering / hydration / isomorphic support */
@@ -10,6 +11,13 @@ function collapseSiblingTextNodes(vs: Array<VTree<DOMRef>>): Array<VTree<DOMRef>
       continue;
     }
     adjusted[++ax] = vs[ix];
+  }
+  // Recursively collapse inside any VFrag children: SSR's foldMap concatenates
+  // text nodes at every nesting level, so nested VFrags need the same treatment.
+  for (const v of adjusted) {
+    if (v.type === VTreeType.VFrag) {
+      v.children = collapseSiblingTextNodes(v.children);
+    }
   }
   return adjusted;
 }
@@ -43,113 +51,10 @@ export function hydrate(logLevel: boolean, mountPoint: DOMRef | Text, vtree: VTr
 function diagnoseError(logLevel: boolean, vtree: VTree<DOMRef>, node: Node): void {
   if (logLevel) console.warn('[DEBUG_HYDRATE] VTree differed from node', vtree, node);
 }
-// https://stackoverflow.com/questions/11068240/what-is-the-most-efficient-way-to-parse-a-css-color-in-javascript
-function parseColor(input: string): number[] {
-  if (input.substr(0, 1) == '#') {
-    const collen = (input.length - 1) / 3;
-    const fact = [17, 1, 0.062272][collen - 1];
-    return [
-      Math.round(parseInt(input.substr(1, collen), 16) * fact),
-      Math.round(parseInt(input.substr(1 + collen, collen), 16) * fact),
-      Math.round(parseInt(input.substr(1 + 2 * collen, collen), 16) * fact),
-    ];
-  } else
-    return input
-      .split('(')[1]
-      .split(')')[0]
-      .split(',')
-      .map((x: string) => {
-        return +x;
-      });
-}
-export function integrityCheck(vtree: VTree<DOMRef>, context: HydrationContext<DOMRef>, drawingContext: DrawingContext<DOMRef>): boolean {
-    return check(true, vtree, context, drawingContext);
-}
 
-// dmj: Does deep equivalence check, spine and leaves of virtual DOM to DOM.
-function check(result: boolean, vtree: VTree<DOMRef>, context: HydrationContext<DOMRef>, drawingContext: DrawingContext<DOMRef>): boolean {
-  // text nodes must be the same
-  if (vtree.type == VTreeType.VText) {
-    if (context.getTag(vtree.domRef) !== '#text') {
-      console.warn('VText domRef not a TEXT_NODE', vtree);
-      result = false;
-    } else if (vtree.text !== context.getTextContent(vtree.domRef)) {
-      console.warn('VText node content differs', vtree);
-      result = false;
-    }
-  } // if vnode / vcomp, must be the same
-  else if (vtree.type === VTreeType.VNode) {
-    // tags must be identical
-    if (vtree.tag.toUpperCase() !== context.getTag(vtree.domRef).toUpperCase()) {
-      console.warn(
-        'Integrity check failed, tags differ',
-        vtree.tag.toUpperCase(),
-        context.getTag(vtree.domRef),
-      );
-      result = false;
-    }
-    // Child lengths must be identical
-   if ('children' in vtree && vtree.children.length !== context.children(vtree.domRef).length) {
-      console.warn(
-        'Integrity check failed, children lengths differ',
-        vtree,
-        vtree.children,
-        context.children(vtree.domRef)
-      );
-      result = false;
-    }
-    // properties must be identical
-    for (const key in vtree.props) {
-      if (key === 'href' || key === 'src') {
-        const absolute = window.location.origin + '/' + vtree.props[key],
-          url = context.getAttribute(vtree.domRef, key),
-          relative = vtree.props[key];
-        if (
-          absolute !== url &&
-          relative !== url &&
-          relative + '/' !== url &&
-          absolute + '/' !== url
-        ) {
-          console.warn('Property ' + key + ' differs', vtree.props[key], context.getAttribute(vtree.domRef,key));
-          result = false;
-        }
-      } else if (key === 'height' || key === 'width') {
-        if (parseFloat(vtree.props[key]) !== parseFloat(context.getAttribute(vtree.domRef, key))) {
-          console.warn('Property ' + key + ' differs', vtree.props[key], context.getAttribute(vtree.domRef,key));
-          result = false;
-        }
-      } else if (key === 'class' || key === 'className') {
-        if (vtree.props[key] !== context.getAttribute(vtree.domRef, 'class')) {
-          console.warn('Property class differs', vtree.props[key], context.getAttribute(vtree.domRef, 'class'));
-          result = false;
-        }
-      } else if (vtree.props[key] !== context.getAttribute(vtree.domRef, key)) {
-        console.warn('Property ' + key + ' differs', vtree.props[key], context.getAttribute(vtree.domRef, key));
-        result = false;
-      }
-    }
-    // styles must be identical
-    for (const key in vtree.css) {
-      if (key === 'color') {
-        if (
-          parseColor(context.getInlineStyle(vtree.domRef, key)).toString() !==
-            parseColor(vtree.css[key]).toString()
-        ) {
-          console.warn('Style ' + key + ' differs', vtree.css[key], context.getInlineStyle(vtree.domRef, key));
-          result = false;
-        }
-      } else if (vtree.css[key] !== context.getInlineStyle(vtree.domRef, key)) {
-        console.warn('Style ' + key + ' differs', vtree.css[key], context.getInlineStyle(vtree.domRef, key));
-        result = false;
-      }
-    }
-    // recursive call for `vnode` / `vcomp`
-    for (const child of vtree.children) {
-       const value = check(result, child, context, drawingContext);
-       result = result && value;
-    }
-  }
-  return result;
+// Advance past all DOM nodes owned by `tree` and return the next sibling.
+function nextAfter(tree: VTree<DOMRef>): Node {
+  return (getLastDOMRef(tree) as unknown as Node).nextSibling as Node;
 }
 
 function walk(logLevel: boolean, vtree: VTree<DOMRef>, node: Node, context: HydrationContext<DOMRef>, drawingContext: DrawingContext<DOMRef>): boolean {
@@ -167,6 +72,22 @@ function walk(logLevel: boolean, vtree: VTree<DOMRef>, node: Node, context: Hydr
           return false;
        }
        break;
+    case VTreeType.VFrag:
+      // A fragment maps to consecutive sibling DOM nodes, one per child.
+      // Each child may occupy >1 DOM node (nested VFrag, VComp with VFrag root),
+      // so advance via nextAfter rather than +1.
+      // Collapse adjacent VText children: SSR (foldMap renderBuilder) concatenates
+      // consecutive text into one string, which the browser parses as one text node.
+      vtree.children = collapseSiblingTextNodes(vtree.children);
+      for (const child of vtree.children) {
+        if (!node) {
+          diagnoseError(logLevel, child, null);
+          return false;
+        }
+        if (!walk(logLevel, child, node, context, drawingContext)) return false;
+        node = nextAfter(child);
+      }
+      break;
     case VTreeType.VText:
        if (node.nodeType !== 3 || vtree.text.trim() !== node.textContent.trim()) {
          diagnoseError(logLevel, vtree, node);
@@ -184,16 +105,19 @@ function walk(logLevel: boolean, vtree: VTree<DOMRef>, node: Node, context: Hydr
       // Fire onCreated events as though the elements had just been created.
       callCreated(node, vtree, drawingContext);
 
+      // Use a DOM cursor rather than a numeric index: a VFrag child spans
+      // multiple childNodes so the vtree index and DOM index diverge.
+      let domCursor: Node = node.firstChild;
       for (var i = 0; i < vtree.children.length; i++) {
         const vdomChild = vtree.children[i];
-        const domChild = node.childNodes[i];
-        if (!domChild) {
-          diagnoseError(logLevel, vdomChild, domChild);
+        if (!domCursor) {
+          diagnoseError(logLevel, vdomChild, null);
           return false;
         }
-        if (!walk(logLevel, vdomChild, domChild, context, drawingContext)) {
+        if (!walk(logLevel, vdomChild, domCursor, context, drawingContext)) {
           return false;
         }
+        domCursor = nextAfter(vdomChild);
       }
       break;
   }

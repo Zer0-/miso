@@ -3,7 +3,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Miso.Html.Event
--- Copyright   :  (C) 2016-2025 David M. Johnson
+-- Copyright   :  (C) 2016-2026 David M. Johnson
 -- License     :  BSD3-style (see the file LICENSE)
 -- Maintainer  :  David M. Johnson <code@dmj.io>
 -- Stability   :  experimental
@@ -35,6 +35,7 @@ module Miso.Html.Event
   , onEnter
   -- *** Form
   , onInput
+  , onInputWith
   , onChange
   , onChangeWith
   , onChecked
@@ -199,6 +200,10 @@ onDoubleClickWithOptions options action =
 -- | https://developer.mozilla.org/en-US/docs/Web/Events/input
 onInput :: (MisoString -> action) -> Attribute action
 onInput f = on "input" valueDecoder (\action _ -> f action)
+-----------------------------------------------------------------------------
+-- | https://developer.mozilla.org/en-US/docs/Web/Events/input
+onInputWith :: (MisoString -> DOMRef -> action) -> Attribute action
+onInputWith = on "input" valueDecoder
 -----------------------------------------------------------------------------
 -- | https://developer.mozilla.org/en-US/docs/Web/Events/change
 onChange :: (MisoString -> action) -> Attribute action

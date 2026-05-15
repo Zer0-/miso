@@ -7,7 +7,7 @@ license-file:        LICENSE
 author:              David M. Johnson <code@dmj.io>
 maintainer:          David M. Johnson <code@dmj.io>
 homepage:            https://haskell-miso.org/
-copyright:           Copyright (c) 2016-2025 David M. Johnson
+copyright:           Copyright (c) 2016-2026 David M. Johnson
 bug-reports:         https://github.com/haskell-miso/miso/issues
 build-type:          Simple
 extra-source-files:  README.md
@@ -135,6 +135,7 @@ library
     Miso.JSON.Parser
     Miso.JSON.Types
     Miso.Lens
+    Miso.Lens.Generic
     Miso.Mathml
     Miso.Mathml.Element
     Miso.Mathml.Property
@@ -170,6 +171,10 @@ library
     Miso.Util.Parser
     Miso.WebSocket
 
+  -- Live reload (meant for WASM or Vanilla)
+  c-sources:
+    cbits/foreign.c
+
   -- FFI declarations
   if arch(javascript) || impl(ghcjs)
     hs-source-dirs:
@@ -189,6 +194,7 @@ library
       template-haskell >= 2.21 && < 2.25
     exposed-modules:
       Miso.DSL.TH
+      Miso.DSL.TH.File
     other-modules:
       Data.JSString
   else
@@ -211,6 +217,6 @@ library
     base          < 5,
     bytestring    < 0.13,
     containers    < 0.9,
-    transformers  < 0.6.2.0,
+    transformers  < 0.7,
     mtl           < 2.4,
     text          < 2.2

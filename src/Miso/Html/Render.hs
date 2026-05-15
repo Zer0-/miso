@@ -9,7 +9,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Miso.Html.Render
--- Copyright   :  (C) 2016-2025 David M. Johnson
+-- Copyright   :  (C) 2016-2026 David M. Johnson
 -- License     :  BSD3-style (see the file LICENSE)
 -- Maintainer  :  David M. Johnson <code@dmj.io>
 -- Stability   :  experimental
@@ -131,14 +131,15 @@ renderBuilder (VNode ns tag attrs children) = mconcat
               , ns == MATHML
               ]
 
-renderBuilder (VComp _ (SomeComponent vcomp)) =
+renderBuilder (VComp _ (SomeComponent vcomp_)) =
   foldMap renderBuilder vkids
     where
 #ifdef SSR
-      vkids = [ unsafeCoerce $ (view vcomp) $ getInitialComponentModel vcomp ]
+      vkids = [ unsafeCoerce $ (view vcomp_) $ getInitialComponentModel vcomp_ ]
 #else
-      vkids = [ unsafeCoerce $ (view vcomp) (model vcomp) ]
+      vkids = [ unsafeCoerce $ (view vcomp_) (model vcomp_) ]
 #endif
+renderBuilder (VFrag _ kids) = foldMap renderBuilder kids
 ----------------------------------------------------------------------------
 renderAttrs :: Attribute action -> Builder
 renderAttrs (ClassList classes) =

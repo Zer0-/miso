@@ -1,7 +1,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Miso.State
--- Copyright   :  (C) 2016-2025 David M. Johnson (@dmjio)
+-- Copyright   :  (C) 2016-2026 David M. Johnson (@dmjio)
 -- License     :  BSD3-style (see the file LICENSE)
 -- Maintainer  :  David M. Johnson <code@dmj.io>
 -- Stability   :  experimental
@@ -26,6 +26,7 @@
 ----------------------------------------------------------------------------
 module Miso.State
   ( ask
+  , asks
   , modify
   , modify'
   , get
@@ -35,6 +36,6 @@ module Miso.State
   , liftIO
   ) where
 ----------------------------------------------------------------------------
-import Control.Monad.RWS (get, gets, modify, modify', tell, put, ask)
+import Control.Monad.RWS (get, gets, modify, modify', tell, put, ask, asks)
 import Control.Monad.IO.Class (liftIO)
 ----------------------------------------------------------------------------

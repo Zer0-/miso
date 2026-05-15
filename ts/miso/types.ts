@@ -13,7 +13,8 @@ export type ComponentId = number;
 export enum VTreeType {
   VComp = 0,
   VNode = 1,
-  VText = 2
+  VText = 2,
+  VFrag = 3
 }
 
 export enum OP {
@@ -25,7 +26,7 @@ export enum OP {
 export type VComp<T> = {
   type: VTreeType.VComp;
   child: VTree<T>;
-  // used w/ drill to get domRef.
+  // set post-mounting via getFirstDOMRef
   componentId?: ComponentId;
   // ^ set post-mounting
   key: string;
@@ -72,13 +73,21 @@ export type VText<T> = {
   nextSibling: VTree<T>;
 };
 
-export type Parent<T> = VNode<T> | VComp<T>;
+export type VFrag<T> = {
+  type: VTreeType.VFrag;
+  key: string;
+  children: Array<VTree<T>>;
+  parent: Parent<T>;
+  nextSibling: VTree<T> | null;
+};
+
+export type Parent<T> = VNode<T> | VComp<T> | VFrag<T>;
 
 export type NodeId = {
   nodeId: number;
 }
 
-export type VTree<T> = VComp<T> | VNode<T> | VText<T>;
+export type VTree<T> = VComp<T> | VNode<T> | VText<T> | VFrag<T>;
 
 export type EventObject<T> = {
    options: Options;
@@ -125,9 +134,9 @@ export type HydrationContext<T> = {
 export type PRNG = (() => (number));
 
 export type ComponentContext = {
-  mountComponent : (events: Array<EventCapture>, componentId: ComponentId, model: Object) => void,
-  unmountComponent : (componentId: ComponentId) => void,
+  mountComponent : (componentId: ComponentId, model: Object) => void,
   modelHydration : (componentId: ComponentId, model: Object) => void
+  unmountComponent : (componentId: ComponentId) => void,
 }
 
 export type DrawingContext<T> = {

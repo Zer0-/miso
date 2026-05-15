@@ -4,7 +4,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Miso.Random
--- Copyright   :  (C) 2016-2025 David M. Johnson
+-- Copyright   :  (C) 2016-2026 David M. Johnson
 -- License     :  BSD3-style (see the file LICENSE)
 -- Maintainer  :  David M. Johnson <code@dmj.io>
 -- Stability   :  experimental
@@ -25,6 +25,7 @@ module Miso.Random
   , next
   , replicateRM
   , getStdGen
+  , setStdGen
     -- ** Globals
   , globalStdGen
   ) where
@@ -70,6 +71,10 @@ globalStdGen = unsafePerformIO $ do
 -- | Read the `globalStdGen`
 getStdGen :: IO StdGen
 getStdGen = readIORef globalStdGen
+-----------------------------------------------------------------------------
+-- | Set the `globalStdGen`
+setStdGen :: StdGen -> IO ()
+setStdGen = atomicWriteIORef globalStdGen
 -----------------------------------------------------------------------------
 -- | Generate n amount of random numbers. Uses the global PRNG 'globalStdGen'.
 --

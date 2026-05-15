@@ -224,7 +224,7 @@ export function updateRef <T> (current: VTree<T> , latest: VTree<T>) : void {
   if (!(current.parent)) {
      return; // at root, do nothing
   }
-  latest.nextSibling = current.nextSibling ? null : current.nextSibling;
+  latest.nextSibling = current.nextSibling;
   latest.parent = current.parent;
   // invariant, parent is always VComp<T>, safe cast
   (current.parent as VComp<T>).child = latest;
@@ -278,23 +278,52 @@ export function mathRandom() : number {
   return Math.random();
 }
 
-// Extract DOM reference from any VTree (handles VComp drilling)
-export function getDOMRef<T>(tree: VTree<T>): T {
+// Zero-allocation traversal: calls cb once per concrete DOM node.
+export function forEachDOMRef<T>(tree: VTree<T>, cb: (ref: T) => void): void {
   switch (tree.type) {
+    case VTreeType.VFrag:
+      for (const child of tree.children) forEachDOMRef(child, cb);
+      break;
     case VTreeType.VComp:
-      return drill(tree);
+      if (tree.child) forEachDOMRef(tree.child, cb);
+      break;
+    default:
+      cb(tree.domRef);
+      break;
+  }
+}
+
+// Returns the first concrete DOM ref owned by a tree, without allocating.
+export function getFirstDOMRef<T>(tree: VTree<T>): T {
+  switch (tree.type) {
+    case VTreeType.VFrag: {
+      if (!tree.children || tree.children.length === 0)
+        throw new Error("getFirstDOMRef called on empty VFrag");
+      return getFirstDOMRef(tree.children[0]);
+    }
+    case VTreeType.VComp:
+      if (!tree.child) throw new Error("getFirstDOMRef called on unmounted VComp");
+      return getFirstDOMRef(tree.child);
     default:
       return tree.domRef;
   }
 }
 
-//c.child should never be null
-export function drill<T>(c: VComp<T>): T {
-  if (!c.child) throw new Error ("'drill' called on an unmounted Component. This should never happen, please make an issue.");
-  switch (c.child.type) {
+// Returns the last concrete DOM ref owned by a tree, without allocating.
+export function getLastDOMRef<T>(tree: VTree<T>): T {
+  switch (tree.type) {
+    case VTreeType.VFrag: {
+      if (!tree.children || tree.children.length === 0)
+        throw new Error("getLastDOMRef called on empty VFrag");
+      return getLastDOMRef(tree.children[tree.children.length - 1]);
+    }
     case VTreeType.VComp:
-      return drill (c.child)
+      if (!tree.child) throw new Error("getLastDOMRef called on unmounted VComp");
+      return getLastDOMRef(tree.child);
     default:
-      return c.child.domRef;
+      return tree.domRef;
   }
 }
+
+// Alias — kept for backwards-compatible public API.
+export function getDOMRef<T>(tree: VTree<T>): T { return getFirstDOMRef(tree); }

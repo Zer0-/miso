@@ -1,9 +1,11 @@
 -----------------------------------------------------------------------------
+{-# LANGUAGE CPP               #-}
+{-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Miso.Html.Element
--- Copyright   :  (C) 2016-2025 David M. Johnson
+-- Copyright   :  (C) 2016-2026 David M. Johnson
 -- License     :  BSD3-style (see the file LICENSE)
 -- Maintainer  :  David M. Johnson <code@dmj.io>
 -- Stability   :  experimental
@@ -146,6 +148,9 @@ module Miso.Html.Element
     , svg_
     ) where
 -----------------------------------------------------------------------------
+#ifdef VANILLA
+import           Miso.JSON (Value(String))
+#endif
 import           Miso.Types
 -----------------------------------------------------------------------------
 import           Miso.Svg.Element (svg_)
@@ -496,8 +501,26 @@ option_ :: [Attribute action] -> [View model action] -> View model action
 option_ = nodeHtml "option"
 -----------------------------------------------------------------------------
 -- | [\<textarea\>](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/textarea)
-textarea_ :: [Attribute action] -> [View model action] -> View model action
-textarea_ = nodeHtml "textarea"
+--
+-- @
+-- textarea_ [ id_ "txt", P.value_ (model ^. txt) ]
+-- @
+--
+-- When compiling on the server, this combinator will render HTML as \<textarea\>text\<\/textarea\>.
+--
+-- @since 1.9.0.0
+textarea_ :: [Attribute action] -> View model action
+#ifdef VANILLA
+textarea_ attrs = nodeHtml "textarea" newAttrs
+  [ text x
+  | Property "value" (String x) <- attrs
+  ] where
+      newAttrs = flip filter attrs $ \case
+        Property "value" _ -> False
+        _ -> True
+#else
+textarea_ = flip (nodeHtml "textarea") []
+#endif
 -----------------------------------------------------------------------------
 -- | [\<sub\>](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/sub)
 sub_ :: [Attribute action] -> [View model action] -> View model action
@@ -597,14 +620,14 @@ meta_ = flip (nodeHtml "meta") []
 -- | [\<area\>](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/area)
 --
 -- @since 1.9.0.0
-area_ :: [Attribute action] -> [View model action] -> View model action
-area_ = nodeHtml "area"
+area_ :: [Attribute action] -> View model action
+area_ = flip (nodeHtml "area") []
 -----------------------------------------------------------------------------
 -- | [\<base\>](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/base)
 --
 -- @since 1.9.0.0
-base_ :: [Attribute action] -> [View model action] -> View model action
-base_ = nodeHtml "base"
+base_ :: [Attribute action] -> View model action
+base_ = flip (nodeHtml "base") []
 -----------------------------------------------------------------------------
 -- | [\<data\>](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/data)
 --

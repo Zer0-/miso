@@ -18,7 +18,7 @@
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Miso.Types
--- Copyright   :  (C) 2016-2025 David M. Johnson
+-- Copyright   :  (C) 2016-2026 David M. Johnson
 -- License     :  BSD3-style (see the file LICENSE)
 -- Maintainer  :  David M. Johnson <code@dmj.io>
 -- Stability   :  experimental
@@ -35,12 +35,14 @@ module Miso.Types
   , View          (..)
   , Key           (..)
   , Attribute     (..)
-  , NS            (..)
+  , Namespace     (..)
   , CSS           (..)
   , JS            (..)
   , LogLevel      (..)
   , VTree         (..)
   , VTreeType     (..)
+  , Tag
+  , CacheBust
   , MountPoint
   , DOMRef
   , ROOT
@@ -54,6 +56,7 @@ module Miso.Types
   -- ** Smart Constructors
   , emptyURI
   , component
+  , vcomp
   , (-->)
   , (<--)
   , (<-->)
@@ -63,15 +66,25 @@ module Miso.Types
   -- ** Component mounting
   , (+>)
   , mount_
+  -- ** Key combinators
+  , keyed
+  -- ** Fragment combinators
+  , fragment
+  , fragment_
+  , vfrag
+  , vfrag_
   -- ** Utils
   , getMountPoint
   , optionalAttrs
+  , optionalVoidAttrs
   , optionalChildren
   , prettyURI
   , prettyQueryString
   -- *** Combinators
   , node
+  , vnode
   , text
+  , vtext
   , text_
   , textRaw
   , textKey
@@ -105,13 +118,9 @@ data Component parent model action
   = Component
   { model :: model
   -- ^ Initial model
-#ifdef SSR
   , hydrateModel :: Maybe (IO model)
-#else
-  , hydrateModel :: Maybe (IO model)
-#endif
-  -- ^ Action to load component state, such as reading data from page.
-  --   The resulting model is only used during initial hydration, not on remounts.
+  -- ^ Optional 'IO' to load component 'model' state, such as reading data from page.
+  --   The resulting 'model' is only used during initial hydration, not on remounts.
   , update :: action -> Effect parent model action
   -- ^ Updates model, optionally providing effects.
   , view :: model -> View model action
@@ -164,11 +173,11 @@ type MountPoint = MisoString
 -----------------------------------------------------------------------------
 -- | Allow users to express CSS and append it to \<head\> before the first draw
 --
--- > Href "http://domain.com/style.css"
+-- > Href "http://domain.com/style.css" (True :: CacheBust)
 -- > Style "body { background-color: red; }"
 --
 data CSS
-  = Href MisoString
+  = Href MisoString CacheBust
   -- ^ URL linking to hosted CSS
   | Style MisoString
   -- ^ Raw CSS content in a 'Miso.Html.Element.style_' tag
@@ -176,18 +185,26 @@ data CSS
   -- ^ CSS built with 'Miso.CSS'
   deriving (Show, Eq)
 -----------------------------------------------------------------------------
+-- | Parameter used to indicate cache busting logic should be used.
+-- If 'True' this will append a timestamp to the query. This will force cache
+-- invalidation on the browser, causing a fetch of the resources.
+--
+type CacheBust = Bool
+-----------------------------------------------------------------------------
 -- | Allow users to express JS and append it to <head> before the first draw
 --
 -- This is meant to be useful in development only.
 --
 -- @
---   Src \"http:\/\/example.com\/script.js\"
---   Script "alert(\"hi\");"
---   ImportMap [ "key" =: "value" ]
+-- Src \"http:\/\/example.com\/script.js\" (False :: CacheBust)
+-- Script "alert(\"hi\");"
+-- ImportMap [ "key" =: "value" ]
+-- Module "console.log(\"hi\");"
 -- @
 --
+-- @since 1.9.0.0
 data JS
-  = Src MisoString
+  = Src MisoString CacheBust
   -- ^ URL linking to hosted JS
   | Script MisoString
   -- ^ Raw JS content that you would enter in a \<script\> tag
@@ -206,8 +223,11 @@ getMountPoint = fromMaybe "body"
 -- | Smart constructor for t'Miso.Types.Component' with sane defaults.
 component
   :: model
+  -- ^ model
   -> (action -> Effect parent model action)
+  -- ^ update
   -> (model -> View model action)
+  -- ^ view
   -> Component parent model action
 component m u v = Component
   { model = m
@@ -225,6 +245,17 @@ component m u v = Component
   , mount = Nothing
   , unmount = Nothing
   }
+-----------------------------------------------------------------------------
+-- | Synonym for 'component'
+vcomp
+  :: model
+  -- ^ model
+  -> (action -> Effect parent model action)
+  -- ^ update
+  -> (model -> View model action)
+  -- ^ view
+  -> Component parent model action
+vcomp = component  
 -----------------------------------------------------------------------------
 -- | A top-level t'Miso.Types.Component' can have no @parent@.
 --
@@ -257,11 +288,19 @@ data LogLevel
   -- ^ Logs on all of the above
   deriving (Show, Eq)
 -----------------------------------------------------------------------------
+-- | Tag type, (e.g. 'div_', 'p_')
+--
+-- Meant to indicate the type of element being created.
+-- Used as the first argument to @document.createElement@ for the web backend.
+--
+type Tag = MisoString
+-----------------------------------------------------------------------------
 -- | Core type for constructing a virtual DOM in Haskell
 data View model action
-  = VNode NS MisoString [Attribute action] [View model action]
+  = VNode Namespace Tag [Attribute action] [View model action]
   | VText (Maybe Key) MisoString
-  | VComp [Attribute action] (SomeComponent model)
+  | VComp (Maybe Key) (SomeComponent model)
+  | VFrag (Maybe Key) [View model action]
   deriving Functor
 -----------------------------------------------------------------------------
 -- | Existential wrapper allowing nesting of t'Miso.Types.Component' in t'Miso.Types.Component'
@@ -269,23 +308,82 @@ data SomeComponent parent
    = forall model action . Eq model
   => SomeComponent (Component parent model action)
 -----------------------------------------------------------------------------
+-- | Like '+>' but operates on any 'View', not just 'Component'.
+--
+-- This appends a 'Key' to any 'View'.
+--
+-- @
+-- keyed "key" ("some text" :: View model action)
+-- keyed "key" $ div_ [ id_ "container" ] [ "content" ]
+-- keyed "key" (mount_ calendarComponent)
+-- @
+--
+-- @since 1.10.0.0
+keyed
+  :: MisoString
+  -> View model action
+  -> View model action
+keyed key = \case
+    VText _ txt ->
+      VText (Just (Key key)) txt
+    VComp _ comp ->
+      VComp (Just (Key key)) comp
+    VFrag _ kids ->
+      VFrag (Just (Key key)) kids
+    VNode ns tag attrs kids ->
+      VNode ns tag (Property "key" (toJSON key) : attrs) kids
+-----------------------------------------------------------------------------
+-- | Create a fragment (keyless).
+--
+-- A fragment groups multiple sibling 'View' nodes without introducing
+-- an extra DOM element.
+--
+-- Synonym for `fragment'
+--
+-- @since 1.10.0.0
+vfrag :: [View model action] -> View model action
+vfrag = fragment
+-----------------------------------------------------------------------------
+-- | Create a fragment (keyless).
+--
+-- A fragment groups multiple sibling 'View' nodes without introducing
+-- an extra DOM element.
+--
+-- @since 1.10.0.0
+fragment :: [View model action] -> View model action
+fragment = VFrag Nothing
+-----------------------------------------------------------------------------
+-- | Like 'fragment', but keyed for efficient diffing.
+--
+-- @since 1.10.0.0
+vfrag_ :: MisoString -> [View model action] -> View model action
+vfrag_ key = VFrag (Just (Key key))
+-----------------------------------------------------------------------------
+-- | Like 'fragment', but keyed for efficient diffing.
+--
+-- @since 1.10.0.0
+fragment_ :: MisoString -> [View model action] -> View model action
+fragment_ key = VFrag (Just (Key key))
+-----------------------------------------------------------------------------
 -- | t'Miso.Types.Component' mounting combinator
 --
 -- Used in the @view@ function to mount a t'Miso.Types.Component' on any 'VNode'.
 --
 -- @
---   "component-id" +> component model noop $ \\m ->
---     div_ [ id_ "foo" ] [ text (ms m) ]
+-- "component-id" +> component model noop $ \\m ->
+--   div_ [ id_ "foo" ] [ text (ms m) ]
 -- @
 --
 -- @since 1.9.0.0
 (+>)
   :: forall child model action a . Eq child
   => MisoString
+  -- ^ 'VComp' 'key_'
   -> Component model child action
+  -- ^ 'Component'
   -> View model a
 infixr 0 +>
-key +> vcomp = VComp [ Property "key" (toJSON key) ] (SomeComponent vcomp)
+key +> comp = VComp (Just (toKey key)) (SomeComponent comp)
 -----------------------------------------------------------------------------
 -- | t'Miso.Types.Component' mounting combinator.
 --
@@ -294,19 +392,20 @@ key +> vcomp = VComp [ Property "key" (toJSON key) ] (SomeComponent vcomp)
 -- the two t'Miso.Types.Component', to ensure unmounting and mounting occurs.
 --
 -- @
---   mount_ $ component model noop $ \\m ->
---     div_ [ id_ "foo" ] [ text (ms m) ]
+-- mount_ $ component model noop $ \\m ->
+--  div_ [ id_ "foo" ] [ text (ms m) ]
 -- @
 --
 -- @since 1.9.0.0
 mount_
   :: Eq child
   => Component model child a
+  -- ^ 'Component' to mount
   -> View model action
-mount_ vcomp = VComp [] (SomeComponent vcomp)
+mount_ comp = VComp Nothing (SomeComponent comp)
 -----------------------------------------------------------------------------
 -- | DOM element namespace.
-data NS
+data Namespace
   = HTML
   -- ^ HTML Namespace
   | SVG
@@ -315,7 +414,7 @@ data NS
   -- ^ MATHML Namespace
   deriving (Show, Eq)
 -----------------------------------------------------------------------------
-instance ToJSVal NS where
+instance ToJSVal Namespace where
   toJSVal = \case
     SVG -> toJSVal ("svg" :: MisoString)
     HTML -> toJSVal ("html" :: MisoString)
@@ -418,12 +517,24 @@ newtype VTree = VTree { getTree :: Object }
 -- in the namespace @ns@. All @attrs@ are called when
 -- the node is created and its children are initialized to @children@.
 node
-  :: NS
+  :: Namespace
   -> MisoString
   -> [Attribute action]
   -> [View model action]
   -> View model action
 node = VNode
+-----------------------------------------------------------------------------
+-- | Create a new 'Miso.Types.VNode'.
+--
+-- Synonym for 'node'
+--
+vnode
+  :: Namespace
+  -> MisoString
+  -> [Attribute action]
+  -> [View model action]
+  -> View model action
+vnode = node
 -----------------------------------------------------------------------------
 -- | Create a new v'VText' with the given content.
 text :: MisoString -> View model action
@@ -432,6 +543,10 @@ text = VText Nothing . htmlEncode
 #else
 text = VText Nothing
 #endif
+-----------------------------------------------------------------------------
+-- | Synonym for 'text'
+vtext :: MisoString -> View model action
+vtext = text
 ----------------------------------------------------------------------------
 -- | Create a new v'VText', not subject to HTML escaping.
 --
@@ -503,7 +618,7 @@ textKey_ k xs = VText (Just (toKey k)) (MS.intercalate " " xs)
 --
 -- @
 -- view :: Bool -> View model action
--- view danger = optionalAttrs textarea_ [ id_ "txt" ] danger [ class_ "danger" ] ["child"]
+-- view danger = optionalAttrs div_ [ id_ "some-div" ] danger [ class_ "danger" ] ["child"]
 -- @
 --
 -- @since 1.9.0.0
@@ -517,6 +632,27 @@ optionalAttrs
 optionalAttrs element attrs condition opts kids =
   case element attrs kids of
     VNode ns name _ _ -> do
+      let newAttrs = concat [ opts | condition ] ++ attrs
+      VNode ns name newAttrs kids
+    x -> x
+-----------------------------------------------------------------------------
+-- | Utility function to make it easy to specify conditional attributes for void elements.
+--
+-- @
+-- view :: Bool -> View model action
+-- view shouldClear = optionalVoidAttrs textarea_ [ value_ "" ] shouldClear [ id_ "text-area-id" ]
+-- @
+--
+-- @since 1.9.0.0
+optionalVoidAttrs
+  :: ([Attribute action] -> View model action)
+  -> [Attribute action] -- ^ Attributes to be added unconditionally
+  -> Bool -- ^ A condition
+  -> [Attribute action] -- ^ Additional attributes to add if the condition is True
+  -> View model action
+optionalVoidAttrs element attrs condition opts =
+  case element attrs of
+    VNode ns name _ kids -> do
       let newAttrs = concat [ opts | condition ] ++ attrs
       VNode ns name newAttrs kids
     x -> x
@@ -586,11 +722,13 @@ data VTreeType
   = VCompType
   | VNodeType
   | VTextType
+  | VFragType
   deriving (Show, Eq)
 -----------------------------------------------------------------------------
 instance ToJSVal VTreeType where
-  toJSVal = \case 
+  toJSVal = \case
     VCompType -> toJSVal (0 :: Int)
     VNodeType -> toJSVal (1 :: Int)
     VTextType -> toJSVal (2 :: Int)
+    VFragType -> toJSVal (3 :: Int)
 -----------------------------------------------------------------------------

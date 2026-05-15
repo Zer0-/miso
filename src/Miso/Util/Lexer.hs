@@ -1,7 +1,8 @@
+{-# LANGUAGE CPP #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Miso.Util.Lexer
--- Copyright   :  (C) 2016-2025 David M. Johnson (@dmjio)
+-- Copyright   :  (C) 2016-2026 David M. Johnson (@dmjio)
 -- License     :  BSD3-style (see the file LICENSE)
 -- Maintainer  :  David M. Johnson <code@dmj.io>
 -- Stability   :  experimental
@@ -35,6 +36,9 @@ module Miso.Util.Lexer
   ) where
 ----------------------------------------------------------------------------
 import           Control.Monad
+#if __GLASGOW_HASKELL__ <= 865
+import           Control.Monad.Fail
+#endif
 import           Control.Applicative
 ----------------------------------------------------------------------------
 import           Miso.String (MisoString, ToMisoString)
@@ -129,6 +133,9 @@ instance Monad Lexer where
   m >>= f = Lexer $ \input -> do
     (x, s) <- runLexer m input
     runLexer (f x) s
+----------------------------------------------------------------------------
+instance MonadFail Lexer where
+  fail _ = oops
 ----------------------------------------------------------------------------
 instance Alternative Lexer where
   empty = Lexer $ \(Stream s l)  -> Left (unexpected s l)
